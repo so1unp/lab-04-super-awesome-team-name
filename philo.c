@@ -29,6 +29,11 @@ int segs_come = 1;
 // Mutex
 static pthread_mutex_t screen = PTHREAD_MUTEX_INITIALIZER;
 
+
+// creo un array sem mutex que representan los tenedores a usar
+pthread_mutex_t tenedores[N];
+
+
 // Imprime en la posición (x,y) la cadena *fmt.
 void print(int y, int x, const char *fmt, ...)
 {
@@ -45,11 +50,14 @@ void print(int y, int x, const char *fmt, ...)
 void eat(int id)
 {
     int f[2]; // tenedores 
-    int ration, i; 
+    int ration, i;
+
 
     // los tenedores a tomar
     f[0] = id;
     f[1] = (id + 1) % N;
+
+
 
     clear_eol(id);
     print(id, 18, "..oO (necesito tenedores)");
@@ -60,6 +68,19 @@ void eat(int id)
         if (!i) {
             clear_eol(id);
 	    }
+
+        if (i == 0) {
+            // agarra uno de los tenedores
+            pthread_mutex_lock(&tenedores[f[i]]);
+        }
+        else {
+            // trata de agarrar el segundo tenedor, si no puede
+            // suelta el primer tenedor y retorna fuera de la funcion
+            if (pthread_mutex_trylock(&tenedores[f[i]]) != 0) {
+                pthread_mutex_unlock(&tenedores[f[0]]);
+                return;                
+            }
+        }
 
         print(id, 18 + (f[i] != id) * 12, "tenedor%d", f[i]);
 
@@ -72,6 +93,10 @@ void eat(int id)
         print(id, 40 + i * 4, "ñam");
         sleep(1 + (rand() % segs_come));
     }
+
+    //libero ambos tenendores
+    pthread_mutex_unlock(&tenedores[f[0]]);
+    pthread_mutex_unlock(&tenedores[f[1]]);
 }
 
 // El filosofo piensa.
@@ -128,6 +153,14 @@ int main(int argc, char* argv[])
     if ((segs_come = atoi(argv[2])) <= 0) {
         fprintf(stderr, "segs-come debe ser mayor que cero.\n");
         exit(EXIT_FAILURE);
+    }
+
+    // inicializo los "tenedores"
+    for (int i = 0; i < 5; i++) {
+        if (pthread_mutex_init(&tenedores[i], NULL) != 0) {
+            perror("pthread_mutex_init");
+            exit(EXIT_FAILURE);
+        }
     }
 
     srand(getpid());

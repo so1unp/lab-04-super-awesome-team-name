@@ -22,6 +22,9 @@ struct params {
     int wait_prod;
     int wait_cons;
     int items;
+    sem_t empty;
+    sem_t full;
+    pthread_mutex_t mutex;
     struct buffer* buf;
 } params_t;
 
@@ -33,7 +36,14 @@ static void* producer(void *p)
     struct params *params = (struct params*) p;
 
     for (i = 0; i < params->items; i++) {
+        sem_wait(&params->empty);
+
+        pthread_mutex_lock(&params->mutex);
         params->buf->buf[i % params->buf->size] = i;
+        pthread_mutex_unlock(&params->mutex);
+
+        sem_post(&params->full);
+
         // Espera una cantidad aleatoria de microsegundos.
         usleep(rand() % params->wait_prod);
     }
@@ -52,7 +62,14 @@ static void* consumer(void *p)
     int *reader_results = (int*) malloc(sizeof(int)*params->items);
 
     for (i = 0; i < params->items; i++) {
+        sem_wait(&params->full);
+
+        pthread_mutex_lock(&params->mutex);
         reader_results[i] = params->buf->buf[i % params->buf->size];
+        pthread_mutex_unlock(&params->mutex);
+        
+        sem_post(&params->empty);
+
         // Espera una cantidad aleatoria de microsegundos.
         usleep(rand() % params->wait_cons);
     }
@@ -80,6 +97,7 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
+    
     struct buffer *buf;
     buf = (struct buffer*) malloc(sizeof(struct buffer));
     if (buf == NULL) {
@@ -106,6 +124,25 @@ int main(int argc, char** argv)
     params = (struct params*) malloc(sizeof(struct params));
     if (params == NULL) {
         perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Inicio el mutex que esta dentro de params
+    if (pthread_mutex_init(&params->mutex, NULL) != 0) {
+        perror("pthread_mutex_init");
+        exit(EXIT_FAILURE);
+    }
+
+    // inicio el semaforo "empty"
+    // inicia con buf size porq puede hacer varios down hasta bloquear
+    if (sem_init(&params->empty, 0, buf->size) != 0) {
+        perror("empty sem_init");
+        exit(EXIT_FAILURE);
+    }
+
+    // inicio el semaforo "full"
+    if (sem_init(&params->full, 0, 0) != 0) {
+        perror("full sem_init");
         exit(EXIT_FAILURE);
     }
 
@@ -137,6 +174,21 @@ int main(int argc, char** argv)
     pthread_create(&producer_t, NULL, producer, params);
     pthread_create(&consumer_t, NULL, consumer, params);
 
+    // Esperar que ambos hilos terminen
+    pthread_join(producer_t, NULL);
+    pthread_join(consumer_t, NULL);
+
+    // destruye los semaforos
+    sem_destroy(&params->empty);
+    sem_destroy(&params->full);
+    pthread_mutex_destroy(&params->mutex);
+
+    // Liberar memoria asignada
+    free(buf->buf);
+    free(buf);
+    free(params);
+
+    exit(EXIT_SUCCESS);
     // Mi trabajo ya esta hecho ...
-    pthread_exit(NULL);
+    // pthread_exit(NULL);
 }
